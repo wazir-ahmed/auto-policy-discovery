@@ -372,31 +372,16 @@ func UpdateHTTP(newPolicy types.KnoxNetworkPolicy, existingPolicies []types.Knox
 
 		// case 2: policy has toHTTPs which are all included in latest one
 		if includedAllRules {
-			continue // next existPolicy
+			continue
+		} else {
+			// case 3: policy has toHTTPs which are not included in latest one
+			updateOutdatedPolicy(latestPolicy, &newPolicy)
+			updated = true
 		}
-
-		// case 3: policy has toHTTPs which are not included in latest one
-		if !includedAllRules {
-			for _, http := range existHTTPs {
-				if !libs.ContainsElement(newHTTPs, http) {
-					newHTTPs = append(newHTTPs, http)
-				}
-			}
-		}
-
-		// annotate the outdated policy
-		updateOutdatedPolicy(latestPolicy, &newPolicy)
-		updated = true
 	}
 
 	// at least one updated
 	if updated {
-		if newPolicy.Metadata["type"] == PolicyTypeEgress {
-			newPolicy.Spec.Egress[0].ToHTTPs = newHTTPs
-		} else {
-			newPolicy.Spec.Ingress[0].ToHTTPs = newHTTPs
-		}
-
 		return newPolicy, true
 	}
 

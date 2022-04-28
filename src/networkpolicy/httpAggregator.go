@@ -50,16 +50,6 @@ func CheckHTTPMethod(method string) bool {
 	return false
 }
 
-func CheckSpecHTTP(specs []string) bool {
-	for _, spec := range specs {
-		if CheckHTTPMethod(spec) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // ================== //
 // == Get/Set Tree == //
 // ================== //
@@ -67,12 +57,15 @@ func CheckSpecHTTP(specs []string) bool {
 func getHTTPTree(targetSrc string, targetDst MergedPortDst) map[string]map[string]*Node {
 	if httpDsts, ok := MergedSrcPerMergedDstForHTTP[targetSrc]; ok {
 		for _, httpDst := range httpDsts {
-			if targetDst.Namespace == httpDst.Namespace && targetDst.MatchLabels == httpDst.MatchLabels {
+			if targetDst.Namespace == httpDst.Namespace &&
+				(targetDst.MatchLabels == httpDst.MatchLabels ||
+					targetDst.Additionals[0] == httpDst.Additional) {
 				toPortInclude := true
 
 				for _, targetToPort := range targetDst.ToPorts {
 					if !libs.ContainsElement(httpDst.ToPorts, targetToPort) {
 						toPortInclude = false
+						break
 					}
 				}
 
@@ -89,12 +82,15 @@ func getHTTPTree(targetSrc string, targetDst MergedPortDst) map[string]map[strin
 func setHTTPTree(targetSrc string, targetDst MergedPortDst, tree map[string]map[string]*Node) {
 	if httpDsts, ok := MergedSrcPerMergedDstForHTTP[targetSrc]; ok {
 		for i, httpDst := range httpDsts {
-			if targetDst.Namespace == httpDst.Namespace && targetDst.MatchLabels == httpDst.MatchLabels {
+			if targetDst.Namespace == httpDst.Namespace &&
+				(targetDst.MatchLabels == httpDst.MatchLabels ||
+					targetDst.Additionals[0] == httpDst.Additional) {
 				toPortInclude := true
 
 				for _, targetToPort := range targetDst.ToPorts {
 					if !libs.ContainsElement(httpDst.ToPorts, targetToPort) {
 						toPortInclude = false
+						break
 					}
 				}
 
@@ -106,9 +102,18 @@ func setHTTPTree(targetSrc string, targetDst MergedPortDst, tree map[string]map[
 
 		MergedSrcPerMergedDstForHTTP[targetSrc] = httpDsts
 	} else {
+
+		var labels, dstInfo string
+		if strings.Contains(targetDst.Namespace, "reserved") {
+			dstInfo = targetDst.Additionals[0]
+		} else {
+			labels = targetDst.MatchLabels
+		}
+
 		httpDst := HTTPDst{
 			Namespace:   targetDst.Namespace,
-			MatchLabels: targetDst.MatchLabels,
+			MatchLabels: labels,
+			Additional:  dstInfo,
 			ToPorts:     []types.SpecPort{},
 			HTTPTree:    tree,
 		}
@@ -141,6 +146,7 @@ type MergedNode struct {
 type HTTPDst struct {
 	Namespace   string
 	MatchLabels string
+	Additional  string
 	ToPorts     []types.SpecPort
 	HTTPTree    map[string]map[string]*Node
 }
@@ -211,11 +217,6 @@ func (n *Node) aggregateChildNodes() {
 		childPaths := []string{}
 		for _, childNode := range n.childNodes {
 			childPaths = append(childPaths, childNode.path)
-		}
-
-		// check path length
-		if !checkSamePathLength(childPaths) {
-			return
 		}
 
 		// replace with wild card path
@@ -415,15 +416,10 @@ func AggregatePaths(treeMap map[string]*Node, paths []string) []string {
 }
 
 func AggregateHTTPRule(aggregatedSrcPerAggregatedDst map[string][]MergedPortDst) {
-	// if level 1, do not aggregate http path
-	if L7DiscoveryLevel == 1 {
-		return
-	}
-
 	for aggregatedSrc, dsts := range aggregatedSrcPerAggregatedDst {
 		for i, dst := range dsts {
-			// check if dst is for HTTP rules
-			if !CheckSpecHTTP(dst.Additionals) {
+			// check if dst has HTTP rules
+			if len(dst.ToHTTPs) == 0 {
 				continue
 			}
 
@@ -433,18 +429,13 @@ func AggregateHTTPRule(aggregatedSrcPerAggregatedDst map[string][]MergedPortDst)
 				httpTree = map[string]map[string]*Node{}
 			}
 
-			updatedAdditionals := []string{}
+			updatedHTTPs := []types.SpecHTTP{}
 
 			methodToPaths := map[string][]string{}
 
-			for _, http := range dst.Additionals {
-				// http = method + path
-				if len(strings.Split(http, "|")) != 2 {
-					continue
-				}
-
-				method := strings.Split(http, "|")[0]
-				path := strings.Split(http, "|")[1]
+			for _, http := range dst.ToHTTPs {
+				method := http.Method
+				path := http.Path
 
 				if val, ok := methodToPaths[method]; ok {
 					if !libs.ContainsElement(val, path) {
@@ -464,13 +455,14 @@ func AggregateHTTPRule(aggregatedSrcPerAggregatedDst map[string][]MergedPortDst)
 
 				aggregatedPaths := AggregatePaths(httpPathTree, paths)
 				for _, aggPath := range aggregatedPaths {
-					updatedAdditionals = append(updatedAdditionals, method+"|"+aggPath)
+					aggHTTP := types.SpecHTTP{Method: method, Path: aggPath}
+					updatedHTTPs = append(updatedHTTPs, aggHTTP)
 				}
 
 				httpTree[method] = httpPathTree
 			}
 
-			dsts[i].Additionals = updatedAdditionals
+			dsts[i].ToHTTPs = updatedHTTPs
 
 			setHTTPTree(aggregatedSrc, dst, httpTree)
 		}

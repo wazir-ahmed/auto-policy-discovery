@@ -1511,10 +1511,8 @@ func DiscoverNetworkPolicy(namespace string,
 	// step 5: {aggregated_src: [dsts (merged proto/port + aggregated_label)]
 	aggregatedSrcPerAggregatedDst := aggregateDstByLabel(aggregatedSrcPerMergedDst, pods)
 
-	// TODO: This needs to be revisited after issues with L7 policies are fixed
-	// -----
 	// step 6: aggregate HTTP rule (method+path)
-	// AggregateHTTPRule(aggregatedSrcPerAggregatedDst)
+	AggregateHTTPRule(aggregatedSrcPerAggregatedDst)
 
 	// step 7: building network policies
 	networkPolicies := buildNetworkPolicy(namespace, services, aggregatedSrcPerAggregatedDst)
