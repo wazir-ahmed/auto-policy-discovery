@@ -48,7 +48,7 @@ func GetNetworkPoliciesBySelector(cfg types.ConfigDB, cluster, namespace, status
 	for _, policy := range results {
 		matched := true
 		for k, v := range selector {
-			val := policy.Spec.Selector.MatchLabels[k]
+			val := policy.Spec.EndpointSelector.MatchLabels[k]
 			if val != v {
 				matched = false
 				break

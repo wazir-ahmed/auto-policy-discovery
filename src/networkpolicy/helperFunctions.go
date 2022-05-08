@@ -890,3 +890,31 @@ func ReplaceMultiubuntuPodName(flows []*flow.Flow, pods []types.Pod) {
 		}
 	}
 }
+
+func updatePodNames(networkLogs []types.KnoxNetworkLog, pods []types.Pod) []types.KnoxNetworkLog {
+	result := []types.KnoxNetworkLog{}
+
+	for _, log := range networkLogs {
+		if log.SrcPodName == "" && log.SrcId != 0 {
+			for _, pod := range pods {
+				if log.SrcId == pod.Identity {
+					log.SrcPodName = pod.PodName
+					log.SrcNamespace = pod.Namespace
+				}
+			}
+		}
+
+		if log.DstPodName == "" && log.DstId != 0 {
+			for _, pod := range pods {
+				if log.DstId == pod.Identity {
+					log.DstPodName = pod.PodName
+					log.DstNamespace = pod.Namespace
+				}
+			}
+		}
+
+		result = append(result, log)
+	}
+
+	return result
+}

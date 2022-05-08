@@ -25,7 +25,7 @@ func populatePbNetPolicyFromNetPolicy(KnoxNwPolicy types.KnoxNetworkPolicy) apb.
 	pbNwPolicy.Outdated = KnoxNwPolicy.Outdated
 
 	// Spec
-	pbNetSelector.MatchLabels = KnoxNwPolicy.Spec.Selector.MatchLabels
+	pbNetSelector.MatchLabels = KnoxNwPolicy.Spec.EndpointSelector.MatchLabels
 	pbNetSpec.NetworkSelector = pbNetSelector
 
 	// Spec Egress

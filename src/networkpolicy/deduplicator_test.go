@@ -17,7 +17,7 @@ func TestGetLatestCIDRs(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -57,7 +57,7 @@ func TestGetLatestFQDNs(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -97,7 +97,7 @@ func TestGetLastedHTTPPolicy(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -138,7 +138,7 @@ func TestGetLatestMatchLabelsPolicy(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -176,7 +176,7 @@ func TestGetLatestEntityPolicy(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -212,7 +212,7 @@ func TestGetLatestServicePolicy(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -257,7 +257,7 @@ func TestUpdateHTTP(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -309,7 +309,7 @@ func TestUpdateToPorts(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -366,7 +366,7 @@ func TestUpdateMatchLabels(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -421,7 +421,7 @@ func TestUpdateEntity(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},
@@ -460,7 +460,7 @@ func TestUpdateService(t *testing.T) {
 		},
 
 		Spec: types.Spec{
-			Selector: types.Selector{
+			EndpointSelector: types.Selector{
 				MatchLabels: map[string]string{
 					"app": "test1",
 				},

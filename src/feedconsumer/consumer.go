@@ -17,6 +17,7 @@ import (
 	cilium "github.com/cilium/cilium/api/v1/flow"
 	pb "github.com/kubearmor/KubeArmor/protobuf"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const ( // status
@@ -187,12 +188,16 @@ func (cfc *KnoxFeedConsumer) processNetworkLogMessage(message []byte) error {
 		return err
 	}
 
-	clusterName := eventMap["cluster_name"]
-
+	clusterName, exists := eventMap["cluster_name"]
 	clusterNameStr := ""
-	if err := json.Unmarshal(clusterName, &clusterNameStr); err != nil {
-		log.Error().Stack().Msg(err.Error())
-		return err
+
+	if !exists {
+		clusterNameStr = "default"
+	} else {
+		if err := json.Unmarshal(clusterName, &clusterNameStr); err != nil {
+			log.Error().Stack().Msg(err.Error())
+			return err
+		}
 	}
 
 	flowEvent, exists := eventMap["flow"]
@@ -221,6 +226,7 @@ func (cfc *KnoxFeedConsumer) processNetworkLogMessage(message []byte) error {
 					Time: &timestamppb.Timestamp{
 						Seconds: time,
 					},
+					IsReply:     &wrapperspb.BoolValue{Value: netLog.Reply},
 					EventType:   &cilium.CiliumEventType{},
 					Source:      &cilium.Endpoint{},
 					Destination: &cilium.Endpoint{},

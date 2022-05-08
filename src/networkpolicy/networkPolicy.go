@@ -1,7 +1,6 @@
 package networkpolicy
 
 import (
-	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,7 +67,11 @@ const (
 )
 
 // if the target IP is in out-of-cluster
-var ReservedWorld = "reserved:world"
+const (
+	ReservedHost  = "reserved:host"
+	ReservedWorld = "reserved:world"
+	ReservedVM    = "reserved:vm"
+)
 
 // ====================== //
 // == Global Variables == //
@@ -233,7 +236,7 @@ type IcmpPortPair struct {
 
 func getDst(log types.KnoxNetworkLog, services []types.Service, cidrBits int) (Dst, bool) {
 	var httpInfo string
-	var labels []string
+	//var labels []string
 
 	// check HTTP
 	if log.HTTPMethod != "" && log.HTTPPath != "" {
@@ -254,35 +257,37 @@ func getDst(log types.KnoxNetworkLog, services []types.Service, cidrBits int) (D
 	}
 
 	if log.DstPodName == "" {
-		// check CIDR (out of cluster)
-		if libs.ContainsElement(log.DstReservedLabels, ReservedWorld) && log.DstIP != "" {
-			cidr := ""
-			if svc, valid := checkK8sService(log, services); valid {
-				// 1. check if the dst IP belongs to a service
-				log.DstNamespace = svc.Namespace
-				for k, v := range svc.Selector {
-					labels = append(labels, k+"="+v)
+		/*
+			// check CIDR (out of cluster)
+			if libs.ContainsElement(log.DstReservedLabels, ReservedWorld) && log.DstIP != "" {
+				cidr := ""
+				if svc, valid := checkK8sService(log, services); valid {
+					// 1. check if the dst IP belongs to a service
+					log.DstNamespace = svc.Namespace
+					for k, v := range svc.Selector {
+						labels = append(labels, k+"="+v)
+					}
+				} else {
+					// 3. else, handle it as cidr policy
+					log.DstNamespace = "reserved:cidr"
+					ipNetwork := log.DstIP + "/" + strconv.Itoa(cidrBits)
+					_, network, _ := net.ParseCIDR(ipNetwork)
+					cidr = network.String()
 				}
-			} else {
-				// 3. else, handle it as cidr policy
-				log.DstNamespace = "reserved:cidr"
-				ipNetwork := log.DstIP + "/" + strconv.Itoa(cidrBits)
-				_, network, _ := net.ParseCIDR(ipNetwork)
-				cidr = network.String()
-			}
 
-			dst := Dst{
-				Namespace:   log.DstNamespace,
-				Additional:  cidr,
-				Protocol:    log.Protocol,
-				DstPort:     log.DstPort,
-				ICMPType:    log.ICMPType,
-				MatchLabels: strings.Join(labels, ","),
-				HTTP:        httpInfo,
-			}
+				dst := Dst{
+					Namespace:   log.DstNamespace,
+					Additional:  cidr,
+					Protocol:    log.Protocol,
+					DstPort:     log.DstPort,
+					ICMPType:    log.ICMPType,
+					MatchLabels: strings.Join(labels, ","),
+					HTTP:        httpInfo,
+				}
 
-			return dst, true
-		}
+				return dst, true
+			}
+		*/
 
 		// reserved entities -> host, remote-node, kube-apiserver
 		if len(log.DstReservedLabels) > 0 {
@@ -301,13 +306,6 @@ func getDst(log types.KnoxNetworkLog, services []types.Service, cidrBits int) (D
 				HTTP:       httpInfo,
 			}
 			return dst, true
-		}
-	}
-
-	if !libs.IsICMP(log.Protocol) {
-		// if dst port is unexposed and namespace is not reserved, it's invalid
-		if !isExposedPort(log.Protocol, log.DstPort) && !strings.HasPrefix(log.DstNamespace, "reserved:") {
-			return Dst{}, false
 		}
 	}
 
@@ -367,8 +365,14 @@ func extractSrcByLabel(labeledSrcsPerDst map[Dst][]SrcSimple, perDst map[Dst][]t
 		for _, log := range logs {
 			src := SrcSimple{}
 
+			// check if the source is a VM
+			isVM := false
+			if log.SrcPodName != "" && libs.ContainsElement(log.SrcReservedLabels, ReservedHost) {
+				isVM = true
+			}
+
 			// if src is reserved
-			if len(log.SrcReservedLabels) > 0 {
+			if !isVM && len(log.SrcReservedLabels) > 0 {
 				src = SrcSimple{
 					MatchLabels: strings.Join(log.SrcReservedLabels, ","),
 				}
@@ -1112,8 +1116,12 @@ func buildNewKnoxPolicy() types.KnoxNetworkPolicy {
 		},
 		Outdated: "",
 		Spec: types.Spec{
-			Selector: types.Selector{
-				MatchLabels: map[string]string{}},
+			NodeSelector: types.Selector{
+				MatchLabels: map[string]string{},
+			},
+			EndpointSelector: types.Selector{
+				MatchLabels: map[string]string{},
+			},
 			Action: "allow",
 		},
 	}
@@ -1135,22 +1143,31 @@ func buildNewKnoxIngressPolicy() types.KnoxNetworkPolicy {
 	return policy
 }
 
-func buildNewIngressPolicyFromEgressPolicy(egressRule types.Egress, selector types.Selector) types.KnoxNetworkPolicy {
+func buildNewIngressPolicyFromEgressPolicy(namespace string, egressSelector types.Selector, egressRule types.Egress, isVM bool) types.KnoxNetworkPolicy {
 	ingress := buildNewKnoxIngressPolicy()
 	ingress.Metadata["rule"] = "matchLabels"
+	ingress.Metadata["namespace"] = namespace
+
+	ingressSelector := types.Selector{MatchLabels: map[string]string{}}
 
 	// update selector labels from egress match labels
 	for k, v := range egressRule.MatchLabels {
-		if k != "k8s:io.kubernetes.pod.namespace" {
-			ingress.Spec.Selector.MatchLabels[k] = v
-		} else if k == "k8s:io.kubernetes.pod.namespace" {
+		if k == "k8s:io.kubernetes.pod.namespace" {
 			ingress.Metadata["namespace"] = v
+		} else {
+			ingressSelector.MatchLabels[k] = v
 		}
+	}
+
+	if isVM {
+		ingress.Spec.NodeSelector = ingressSelector
+	} else {
+		ingress.Spec.EndpointSelector = ingressSelector
 	}
 
 	// update ingress labels from selector match labels
 	ingress.Spec.Ingress = append(ingress.Spec.Ingress, types.Ingress{MatchLabels: map[string]string{}})
-	for k, v := range selector.MatchLabels {
+	for k, v := range egressSelector.MatchLabels {
 		ingress.Spec.Ingress[0].MatchLabels[k] = v
 	}
 
@@ -1184,7 +1201,7 @@ func buildNewIngressPolicyFromSameSelector(namespace string, selector types.Sele
 	ingress := buildNewKnoxIngressPolicy()
 	ingress.Metadata["namespace"] = namespace
 	for k, v := range selector.MatchLabels {
-		ingress.Spec.Selector.MatchLabels[k] = v
+		ingress.Spec.EndpointSelector.MatchLabels[k] = v
 	}
 
 	return ingress
@@ -1192,6 +1209,11 @@ func buildNewIngressPolicyFromSameSelector(namespace string, selector types.Sele
 
 func buildIngressFromEntitiesPolicy(namespace string, mergedSrcPerMergedDst map[string][]MergedPortDst, networkPolicies []types.KnoxNetworkPolicy) []types.KnoxNetworkPolicy {
 	for aggregatedSrc, aggregatedMergedDsts := range mergedSrcPerMergedDst {
+		// skip if src is a VM
+		if strings.Contains(aggregatedSrc, ReservedVM) {
+			continue
+		}
+
 		// if src includes "reserved" prefix, it means Ingress Policy
 		if strings.Contains(aggregatedSrc, "reserved:") {
 			reservedLables := strings.Split(aggregatedSrc, ",")
@@ -1205,6 +1227,11 @@ func buildIngressFromEntitiesPolicy(namespace string, mergedSrcPerMergedDst map[
 			for _, dst := range aggregatedMergedDsts {
 				if dst.MatchLabels == "" {
 					continue
+				}
+
+				isDstVM := false
+				if strings.Contains(dst.MatchLabels, ReservedVM) {
+					isDstVM = true
 				}
 
 				ingressPolicy := buildNewKnoxIngressPolicy()
@@ -1222,7 +1249,11 @@ func buildIngressFromEntitiesPolicy(namespace string, mergedSrcPerMergedDst map[
 					dstkey := kv[0]
 					dstval := kv[1]
 
-					ingressPolicy.Spec.Selector.MatchLabels[dstkey] = dstval
+					if isDstVM {
+						ingressPolicy.Spec.NodeSelector.MatchLabels[dstkey] = dstval
+					} else {
+						ingressPolicy.Spec.EndpointSelector.MatchLabels[dstkey] = dstval
+					}
 				}
 
 				ingressRule := types.Ingress{}
@@ -1243,7 +1274,8 @@ func buildIngressFromEntitiesPolicy(namespace string, mergedSrcPerMergedDst map[
 				included := false
 				for _, policy := range networkPolicies {
 					if policy.Metadata["rule"] == "fromEntities" &&
-						cmp.Equal(&ingressPolicy.Spec.Selector, &policy.Spec.Selector) &&
+						cmp.Equal(&ingressPolicy.Spec.NodeSelector, &policy.Spec.NodeSelector) &&
+						cmp.Equal(&ingressPolicy.Spec.EndpointSelector, &policy.Spec.EndpointSelector) &&
 						cmp.Equal(policy.Spec.Ingress[0].ToPorts, ingressRule.ToPorts) &&
 						cmp.Equal(policy.Spec.Ingress[0].ICMPs, ingressRule.ICMPs) {
 
@@ -1278,12 +1310,22 @@ func buildNetworkPolicy(namespace string, services []types.Service, aggregatedSr
 	discoverRuleTypes := cfg.GetCfgNetworkRuleTypes()
 
 	for aggregatedSrc, aggregatedMergedDsts := range aggregatedSrcPerAggregatedDst {
+		isSrcVM := false
+		if strings.Contains(aggregatedSrc, ReservedVM) {
+			isSrcVM = true
+		}
+
 		// if src includes "reserved" prefix, process later
-		if strings.Contains(aggregatedSrc, "reserved") {
+		if !isSrcVM && strings.Contains(aggregatedSrc, "reserved") {
 			continue
 		}
 
 		for _, dst := range aggregatedMergedDsts {
+			isDstVM := false
+			if strings.Contains(dst.MatchLabels, ReservedVM) {
+				isDstVM = true
+			}
+
 			egressPolicy := buildNewKnoxEgressPolicy()
 			egressPolicy.Metadata["namespace"] = namespace
 			egressPolicy.FlowIDs = dst.FlowIDs
@@ -1298,7 +1340,11 @@ func buildNetworkPolicy(namespace string, services []types.Service, aggregatedSr
 					continue
 				}
 
-				egressPolicy.Spec.Selector.MatchLabels[labelKV[0]] = labelKV[1]
+				if isSrcVM {
+					egressPolicy.Spec.NodeSelector.MatchLabels[labelKV[0]] = labelKV[1]
+				} else {
+					egressPolicy.Spec.EndpointSelector.MatchLabels[labelKV[0]] = labelKV[1]
+				}
 			}
 
 			// sorting toPorts
@@ -1351,7 +1397,9 @@ func buildNetworkPolicy(namespace string, services []types.Service, aggregatedSr
 				}
 
 				// although src and dst have same namespace, speficy namespace for clarity
-				egressRule.MatchLabels["k8s:io.kubernetes.pod.namespace"] = dst.Namespace
+				if !isDstVM {
+					egressRule.MatchLabels["k8s:io.kubernetes.pod.namespace"] = dst.Namespace
+				}
 
 				// check egress
 				egressPolicy.Spec.Egress = append(egressPolicy.Spec.Egress, egressRule)
@@ -1361,8 +1409,17 @@ func buildNetworkPolicy(namespace string, services []types.Service, aggregatedSr
 
 				// check ingress
 				if discoverPolicyTypes&INGRESS > 0 {
-					ingressPolicy := buildNewIngressPolicyFromEgressPolicy(egressRule, egressPolicy.Spec.Selector)
-					ingressPolicy.Spec.Ingress[0].MatchLabels["k8s:io.kubernetes.pod.namespace"] = namespace
+					var selector types.Selector
+					if isSrcVM {
+						selector = egressPolicy.Spec.NodeSelector
+					} else {
+						selector = egressPolicy.Spec.EndpointSelector
+					}
+					ingressPolicy := buildNewIngressPolicyFromEgressPolicy(namespace, selector, egressRule, isDstVM)
+					if !isSrcVM {
+						ingressPolicy.Spec.Ingress[0].MatchLabels["k8s:io.kubernetes.pod.namespace"] = namespace
+					}
+
 					ingressPolicy.FlowIDs = egressPolicy.FlowIDs
 					networkPolicies = append(networkPolicies, ingressPolicy)
 				}
@@ -1543,6 +1600,9 @@ func PopulateNetworkPoliciesFromNetworkLogs(networkLogs []types.KnoxNetworkLog) 
 			log.Error().Msg(err.Error())
 			continue
 		}
+
+		// update missing pod name field based on identity
+		networkLogs = updatePodNames(networkLogs, pods)
 
 		log.Info().Msgf("updateDNSFlows for cluster [%s]", clusterName)
 		// update DNS req. flows, DNSToIPs map

@@ -183,6 +183,10 @@ func ConvertCiliumFlowToKnoxNetworkLog(ciliumFlow *cilium.Flow) (types.KnoxNetwo
 	log.SrcNamespace = ciliumFlow.Source.Namespace
 	log.DstNamespace = ciliumFlow.Destination.Namespace
 
+	// set identity
+	log.SrcId = ciliumFlow.Source.Identity
+	log.DstId = ciliumFlow.Destination.Identity
+
 	// set pod
 	log.SrcPodName = ciliumFlow.Source.GetPodName()
 	log.DstPodName = ciliumFlow.Destination.GetPodName()
@@ -437,7 +441,8 @@ func buildNewCiliumNetworkPolicy(inPolicy types.KnoxNetworkPolicy) types.CiliumN
 	}
 
 	// update selector matchLabels
-	ciliumPolicy.Spec.Selector.MatchLabels = inPolicy.Spec.Selector.MatchLabels
+	ciliumPolicy.Spec.NodeSelector.MatchLabels = inPolicy.Spec.NodeSelector.MatchLabels
+	ciliumPolicy.Spec.EndpointSelector.MatchLabels = inPolicy.Spec.EndpointSelector.MatchLabels
 
 	return ciliumPolicy
 }
