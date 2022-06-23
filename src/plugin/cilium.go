@@ -12,7 +12,6 @@ import (
 
 	"github.com/accuknox/auto-policy-discovery/src/libs"
 	logger "github.com/accuknox/auto-policy-discovery/src/logging"
-	obs "github.com/accuknox/auto-policy-discovery/src/observability"
 	"github.com/accuknox/auto-policy-discovery/src/types"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -850,7 +849,7 @@ func StartHubbleRelay(StopChan chan struct{}, cfg types.ConfigCiliumHubble) {
 				flow := r.Flow
 
 				CiliumFlowsMutex.Lock()
-				obs.ProcessCiliumFlow(flow)
+				// obs.ProcessCiliumFlow(flow)
 				CiliumFlows = append(CiliumFlows, flow)
 				CiliumFlowsMutex.Unlock()
 			}

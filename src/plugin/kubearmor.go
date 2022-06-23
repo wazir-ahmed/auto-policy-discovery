@@ -364,7 +364,7 @@ func StartKubeArmorRelay(StopChan chan struct{}, cfg types.ConfigKubeArmorRelay)
 				}
 
 				KubeArmorRelayLogsMutex.Lock()
-				obs.ProcessKubearmorLog(res)
+				//obs.ProcessKubearmorLog(res)
 				KubeArmorRelayLogs = append(KubeArmorRelayLogs, res)
 				KubeArmorRelayLogsMutex.Unlock()
 			}
