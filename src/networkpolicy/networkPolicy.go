@@ -1495,42 +1495,365 @@ func DiscoverNetworkPolicy(namespace string,
 	services []types.Service,
 	pods []types.Pod) []types.KnoxNetworkPolicy {
 
-	// step 1: [network logs] -> {dst: [network logs (src+dst)]}
-	originLogsPerDst := groupNetworkLogPerDst(networkLogs, services, CIDRBits)
+	networkPolicies := []types.KnoxNetworkPolicy{}
 
-	/*
-		step 2: {dst: [network logs (src+dst)]} -> {dst: [srcs (labeled)]}
-		+++ here, we start to track flow IDs +++
-		we keep LabeledSrcsPerDst map for aggregating the merged policy set in the future
-	*/
-	labeledSrcsPerDst := map[Dst][]SrcSimple{}
-	if val, ok := LabeledSrcsPerDst[namespace]; ok {
-		labeledSrcsPerDst = extractSrcByLabel(val, originLogsPerDst, pods)
-	} else {
-		labeledSrcsPerDst = extractSrcByLabel(labeledSrcsPerDst, originLogsPerDst, pods)
+	ingressPolicies := map[string][]types.KnoxNetworkPolicy{}
+	egressPolicies := map[string][]types.KnoxNetworkPolicy{}
+
+	for _, log := range networkLogs {
+		ingress, egress := convertKnoxNetworkLogToKnoxNetworkPolicy(&log, pods)
+
+		if ingress != nil {
+			endpointSelector := getLabelArrayFromMap(ingress.Spec.Selector.MatchLabels)
+			k := strings.Join(endpointSelector, ",")
+			ingressPolicies[k] = append(ingressPolicies[k], *ingress)
+		}
+		if egress != nil {
+			endpointSelector := getLabelArrayFromMap(egress.Spec.Selector.MatchLabels)
+			k := strings.Join(endpointSelector, ",")
+			egressPolicies[k] = append(egressPolicies[k], *egress)
+		}
 	}
 
-	// step 3: {dst: [srcs (labeled)]} -> {dst: [merged srcs (labeled + merged)]}
-	aggregatedSrcsPerDst := aggregateSrcByLabel(labeledSrcsPerDst, pods)
+	for selector, policies := range ingressPolicies {
+		if len(policies) > 1 {
+			mergedPolicy := mergeNetworkPolicies(policies[0], policies[1:])
+			ingressPolicies[selector] = []types.KnoxNetworkPolicy{mergedPolicy}
+		}
+	}
 
-	// step 4: {aggregated_src: [dsts (merged proto/port)]} merging protocols and ports for the same destinations
-	aggregatedSrcPerMergedDst := mergeDstByProtoPort(aggregatedSrcsPerDst)
+	for selector, policies := range egressPolicies {
+		if len(policies) > 1 {
+			mergedPolicy := mergeNetworkPolicies(policies[0], policies[1:])
+			egressPolicies[selector] = []types.KnoxNetworkPolicy{mergedPolicy}
+		}
+	}
 
-	// step 5: {aggregated_src: [dsts (merged proto/port + aggregated_label)]
-	aggregatedSrcPerAggregatedDst := aggregateDstByLabel(aggregatedSrcPerMergedDst, pods)
-
-	// TODO: This needs to be revisited after issues with L7 policies are fixed
-	// -----
-	// step 6: aggregate HTTP rule (method+path)
-	// AggregateHTTPRule(aggregatedSrcPerAggregatedDst)
-
-	// step 7: building network policies
-	networkPolicies := buildNetworkPolicy(namespace, services, aggregatedSrcPerAggregatedDst)
-
-	// step 8: update labeledSrcsPerDst map (remove cidr dst/additionals)
-	LabeledSrcsPerDst[namespace] = updateLabeledSrcPerDst(labeledSrcsPerDst)
-
+	for _, p := range ingressPolicies {
+		networkPolicies = append(networkPolicies, p...)
+	}
+	for _, p := range egressPolicies {
+		networkPolicies = append(networkPolicies, p...)
+	}
 	return networkPolicies
+}
+
+func mergeNetworkPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+	if existPolicy.Metadata["type"] == PolicyTypeIngress {
+		return mergeIngressPolicies(existPolicy, policies)
+	}
+	return mergeEgressPolicies(existPolicy, policies)
+}
+
+func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+	mergedPolicy := existPolicy
+
+	for i, policy := range policies {
+		if i == 0 {
+			mergedPolicy = policy
+		} else {
+			newIngress := policy.Spec.Ingress[0]
+
+			if len(newIngress.MatchLabels) > 0 {
+				selectorFound := false
+				lblArr := getLabelArrayFromMap(newIngress.MatchLabels)
+				newSelector := strings.Join(lblArr, ",")
+
+				for i, existIngress := range mergedPolicy.Spec.Ingress {
+					lblArr = getLabelArrayFromMap(existIngress.MatchLabels)
+					existSelector := strings.Join(lblArr, ",")
+
+					// selector matched, merge port/protocol pair
+					if newSelector == existSelector {
+						existIngress.ToPorts = mergePortProtocol(existIngress.ToPorts, newIngress.ToPorts[0])
+						mergedPolicy.Spec.Ingress[i] = existIngress
+						selectorFound = true
+						break
+					}
+				}
+
+				// new fromEndpoint selector with different match labels
+				if !selectorFound {
+					mergedPolicy.Spec.Ingress = append(mergedPolicy.Spec.Ingress, newIngress)
+				}
+			} else if len(policy.Spec.Ingress[0].FromEntities) > 0 {
+				entityFound := false
+				newEntity := newIngress.FromEntities[0]
+
+				for i, existIngress := range mergedPolicy.Spec.Ingress {
+					existEntity := existIngress.FromEntities[0]
+
+					// entities matched, merge port/protocol pair
+					if newEntity == existEntity {
+						existIngress.ToPorts = mergePortProtocol(existIngress.ToPorts, newIngress.ToPorts[0])
+						mergedPolicy.Spec.Ingress[i] = existIngress
+						entityFound = true
+						break
+					}
+				}
+
+				// new fromEntity selector
+				if !entityFound {
+					mergedPolicy.Spec.Ingress = append(mergedPolicy.Spec.Ingress, newIngress)
+				}
+			}
+		}
+	}
+
+	return mergedPolicy
+}
+
+func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+	mergedPolicy := existPolicy
+
+	for i, policy := range policies {
+		if i == 0 {
+			mergedPolicy = policy
+		} else {
+			newEgress := policy.Spec.Egress[0]
+
+			if len(newEgress.MatchLabels) > 0 {
+				selectorFound := false
+				lblArr := getLabelArrayFromMap(newEgress.MatchLabels)
+				newSelector := strings.Join(lblArr, ",")
+
+				for i, existEgress := range mergedPolicy.Spec.Egress {
+					lblArr = getLabelArrayFromMap(existEgress.MatchLabels)
+					existSelector := strings.Join(lblArr, ",")
+
+					// selector matched, merge port/protocol pair
+					if newSelector == existSelector {
+						existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
+						mergedPolicy.Spec.Egress[i] = existEgress
+						selectorFound = true
+						break
+					}
+				}
+
+				// new toEndpoint selector with different match labels
+				if !selectorFound {
+					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+				}
+			} else if len(policy.Spec.Egress[0].ToEntities) > 0 {
+				entityFound := false
+				newEntity := newEgress.ToEntities[0]
+
+				for i, existEgress := range mergedPolicy.Spec.Egress {
+					existEntity := existEgress.ToEntities[0]
+
+					// entities matched, merge port/protocol pair
+					if newEntity == existEntity {
+						existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
+						mergedPolicy.Spec.Egress[i] = existEgress
+						entityFound = true
+						break
+					}
+				}
+
+				// new fromEntity selector
+				if !entityFound {
+					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+				}
+			} else if len(policy.Spec.Egress[0].ToFQDNs) > 0 {
+				fqdnFound := false
+				newFQDN := newEgress.ToFQDNs[0].MatchNames[0]
+
+				for i, existEgress := range mergedPolicy.Spec.Egress {
+					existFQDN := existEgress.ToFQDNs[0].MatchNames[0]
+
+					// FQDNs matched, merge port/protocol pair
+					if newFQDN == existFQDN {
+						existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
+						mergedPolicy.Spec.Egress[i] = existEgress
+						fqdnFound = true
+						break
+					}
+				}
+
+				// new fromEntity selector
+				if !fqdnFound {
+					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+				}
+			}
+		}
+	}
+
+	return mergedPolicy
+}
+
+func mergePortProtocol(existPorts []types.SpecPort, newPort types.SpecPort) []types.SpecPort {
+	if !libs.ContainsElement(existPorts, newPort) {
+		existPorts = append(existPorts, newPort)
+	}
+	return existPorts
+}
+
+func convertKnoxNetworkLogToKnoxNetworkPolicy(log *types.KnoxNetworkLog, pods []types.Pod) (_, _ *types.KnoxNetworkPolicy) {
+	var ingressPolicy, egressPolicy *types.KnoxNetworkPolicy = nil, nil
+
+	if log.SrcPodName != "" && log.DstPodName != "" {
+		// 1. Generate egress policy for the src
+		//        and ingress policy for the dst
+
+		// Ingress/Egress Policy
+		ePolicy, iPolicy := buildNewKnoxEgressPolicy(), buildNewKnoxIngressPolicy()
+
+		// 1.1 Set the endpoint selector
+		ePolicy.Spec.Selector.MatchLabels = getEndpointMatchLabels(log.SrcPodName, pods)
+		iPolicy.Spec.Selector.MatchLabels = getEndpointMatchLabels(log.DstPodName, pods)
+
+		// 1.2 Set the to/from Endpoint selector
+		egress := types.Egress{}
+		ingress := types.Ingress{}
+		egress.MatchLabels = getEndpointMatchLabels(log.DstPodName, pods)
+		ingress.MatchLabels = getEndpointMatchLabels(log.SrcPodName, pods)
+
+		// 1.3 Set the dst port/protocol
+		if !libs.IsICMP(log.Protocol) {
+			egress.ToPorts = []types.SpecPort{{Port: strconv.Itoa(log.DstPort), Protocol: libs.GetProtocol(log.Protocol)}}
+			ingress.ToPorts = append(ingress.ToPorts, egress.ToPorts...)
+		} else {
+			// 1.4 Set the icmp code/type
+			family := "IPv4"
+			if log.Protocol == libs.IPProtocolICMPv6 {
+				family = "IPv6"
+			}
+			egress.ICMPs = []types.SpecICMP{{Family: family, Type: uint8(log.ICMPType)}}
+			ingress.ICMPs = append(ingress.ICMPs, egress.ICMPs...)
+		}
+
+		ePolicy.Spec.Egress = append(ePolicy.Spec.Egress, egress)
+		iPolicy.Spec.Ingress = append(iPolicy.Spec.Ingress, ingress)
+
+		ePolicy.Metadata["namespace"] = log.SrcNamespace
+		iPolicy.Metadata["namespace"] = log.DstNamespace
+
+		egressPolicy = &ePolicy
+		ingressPolicy = &iPolicy
+	} else if len(log.SrcReservedLabels) > 0 {
+		// 2. Generate ingress policy only for the dst
+
+		// Ingress Policy
+		iPolicy := buildNewKnoxIngressPolicy()
+
+		// 2.1 Set the endpoint selector
+		iPolicy.Spec.Selector.MatchLabels = getEndpointMatchLabels(log.DstPodName, pods)
+
+		// 2.2 Set the fromEntities selector
+		ingress := types.Ingress{}
+		srcEntity := getEntityFromReservedLabels(log.SrcReservedLabels)
+		if srcEntity != "" {
+			ingress.FromEntities = append(ingress.FromEntities, srcEntity)
+
+			// 2.3 Set the dst port/protocol
+			if !libs.IsICMP(log.Protocol) {
+				ingress.ToPorts = []types.SpecPort{{Port: strconv.Itoa(log.DstPort), Protocol: libs.GetProtocol(log.Protocol)}}
+			} else {
+				// 2.4 Set the icmp code/type
+				family := "IPv4"
+				if log.Protocol == libs.IPProtocolICMPv6 {
+					family = "IPv6"
+				}
+				ingress.ICMPs = []types.SpecICMP{{Family: family, Type: uint8(log.ICMPType)}}
+			}
+
+			iPolicy.Spec.Ingress = append(iPolicy.Spec.Ingress, ingress)
+			iPolicy.Metadata["namespace"] = log.DstNamespace
+
+			ingressPolicy = &iPolicy
+		}
+	} else if len(log.DstReservedLabels) > 0 {
+		// 3. Generate egress policy only for the src
+
+		// Egress Policy
+		ePolicy := buildNewKnoxEgressPolicy()
+
+		// 3.1 Set the endpoint selector
+		ePolicy.Spec.Selector.MatchLabels = getEndpointMatchLabels(log.SrcPodName, pods)
+
+		// 3.2 Set the toEntities/ToFQDNs
+		egress := types.Egress{}
+		dstEntity := getEntityFromReservedLabels(log.DstReservedLabels)
+		if dstEntity != "" {
+			if dstEntity == "world" && log.DNSQuery != "" {
+				fqdn := types.SpecFQDN{[]string{log.DNSQuery}}
+				egress.ToFQDNs = append(egress.ToFQDNs, fqdn)
+			} else {
+				egress.ToEntities = append(egress.ToEntities, dstEntity)
+			}
+
+			// 3.3 Set the dst port/protocol
+			if !libs.IsICMP(log.Protocol) {
+				egress.ToPorts = []types.SpecPort{{Port: strconv.Itoa(log.DstPort), Protocol: libs.GetProtocol(log.Protocol)}}
+			} else {
+				// 3.4 Set the icmp code/type
+				family := "IPv4"
+				if log.Protocol == libs.IPProtocolICMPv6 {
+					family = "IPv6"
+				}
+				egress.ICMPs = []types.SpecICMP{{Family: family, Type: uint8(log.ICMPType)}}
+			}
+
+			ePolicy.Spec.Egress = append(ePolicy.Spec.Egress, egress)
+			ePolicy.Metadata["namespace"] = log.SrcNamespace
+			egressPolicy = &ePolicy
+		}
+	}
+	return ingressPolicy, egressPolicy
+}
+
+func getEntityFromReservedLabels(reservedLabels []string) string {
+	entities := []string{}
+
+	for _, label := range reservedLabels {
+		entity := strings.TrimPrefix(label, "reserved:")
+		entities = append(entities, entity)
+	}
+
+	// reservedLabels might contain more than one entity name.
+	// Choose the label which is more unique/specific to
+	// the src/dst entity and return the entity name
+	if libs.ContainsElement(entities, "kube-apiserver") {
+		return "kube-apiserver"
+	} else if libs.ContainsElement(entities, "world") {
+		return "world"
+	} else if libs.ContainsElement(entities, "remote-node") {
+		return "remote-node"
+	} else if libs.ContainsElement(entities, "host") {
+		return "host"
+	} else {
+		return ""
+	}
+}
+
+func getEndpointMatchLabels(podName string, pods []types.Pod) map[string]string {
+	podLabels := getLabelsFromPod(podName, pods)
+	matchLabels := getLabelMapFromArray(podLabels)
+	return matchLabels
+}
+
+func getLabelMapFromArray(labels []string) map[string]string {
+	labelMap := map[string]string{}
+
+	for _, label := range labels {
+		kvPair := strings.Split(label, "=")
+		if len(kvPair) != 2 {
+			continue
+		}
+		labelMap[kvPair[0]] = kvPair[1]
+	}
+
+	return labelMap
+}
+
+func getLabelArrayFromMap(labelMap map[string]string) []string {
+	labels := []string{}
+
+	for k, v := range labelMap {
+		labels = append(labels, (k + "=" + v))
+	}
+
+	return labels
 }
 
 func applyPolicyFilter(discoveredPolicies map[string][]types.KnoxNetworkPolicy) map[string][]types.KnoxNetworkPolicy {
