@@ -177,7 +177,7 @@ func UpdateNetworkPolicyToMySQL(cfg types.ConfigDB, policy types.KnoxNetworkPoli
 
 	// set status -> outdated
 	stmt, err := db.Prepare("UPDATE " + TableNetworkPolicy_TableName +
-		" SET apiVersion=?,kind=?,clusterName=?,namespace=?,type=?,status=?,outdated=?,spec=?,updatedTime=? WHERE name = ?")
+		" SET apiVersion=?,kind=?,cluster_name=?,namespace=?,type=?,status=?,outdated=?,spec=?,updatedTime=? WHERE name = ?")
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func UpdateNetworkPolicyToMySQL(cfg types.ConfigDB, policy types.KnoxNetworkPoli
 	_, err = stmt.Exec(
 		policy.APIVersion,
 		policy.Kind,
-		policy.Metadata["clusterName"],
+		policy.Metadata["cluster_name"],
 		policy.Metadata["namespace"],
 		policy.Metadata["type"],
 		policy.Metadata["status"],

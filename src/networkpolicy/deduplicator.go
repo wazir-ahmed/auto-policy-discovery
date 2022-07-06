@@ -952,7 +952,7 @@ func UpdateDuplicatedPolicy(existingPolicies []types.KnoxNetworkPolicy, discover
 				newPolicies = append(newPolicies, namedPolicy)
 			}
 		} else {
-			existPolicy, ok := existIngressPolicies[selector]
+			existPolicy, ok := existEgressPolicies[selector]
 			if ok {
 				// Egress policy for this endpoint exists already
 				mergedPolicy := mergeEgressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
