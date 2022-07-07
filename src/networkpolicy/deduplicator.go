@@ -943,9 +943,11 @@ func UpdateDuplicatedPolicy(existingPolicies []types.KnoxNetworkPolicy, discover
 			existPolicy, ok := existIngressPolicies[selector]
 			if ok {
 				// Ingress policy for this endpoint exists already
-				mergedPolicy := mergeIngressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
-				existIngressPolicies[selector] = mergedPolicy
-				libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
+				mergedPolicy, updated := mergeIngressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
+				if updated {
+					existIngressPolicies[selector] = mergedPolicy
+					libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
+				}
 			} else {
 				// Ingress policy for this endpoint does not exists previously
 				namedPolicy := GeneratePolicyName(policyNamesMap, newPolicy, clusterName)
@@ -955,9 +957,11 @@ func UpdateDuplicatedPolicy(existingPolicies []types.KnoxNetworkPolicy, discover
 			existPolicy, ok := existEgressPolicies[selector]
 			if ok {
 				// Egress policy for this endpoint exists already
-				mergedPolicy := mergeEgressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
-				existEgressPolicies[selector] = mergedPolicy
-				libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
+				mergedPolicy, updated := mergeEgressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
+				if updated {
+					existEgressPolicies[selector] = mergedPolicy
+					libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
+				}
 			} else {
 				// Egress policy for this endpoint does not exists previously
 				namedPolicy := GeneratePolicyName(policyNamesMap, newPolicy, clusterName)

@@ -1517,14 +1517,14 @@ func DiscoverNetworkPolicy(namespace string,
 
 	for selector, policies := range ingressPolicies {
 		if len(policies) > 1 {
-			mergedPolicy := mergeNetworkPolicies(policies[0], policies[1:])
+			mergedPolicy, _ := mergeNetworkPolicies(policies[0], policies[1:])
 			ingressPolicies[selector] = []types.KnoxNetworkPolicy{mergedPolicy}
 		}
 	}
 
 	for selector, policies := range egressPolicies {
 		if len(policies) > 1 {
-			mergedPolicy := mergeNetworkPolicies(policies[0], policies[1:])
+			mergedPolicy, _ := mergeNetworkPolicies(policies[0], policies[1:])
 			egressPolicies[selector] = []types.KnoxNetworkPolicy{mergedPolicy}
 		}
 	}
@@ -1538,15 +1538,16 @@ func DiscoverNetworkPolicy(namespace string,
 	return networkPolicies
 }
 
-func mergeNetworkPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+func mergeNetworkPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) (types.KnoxNetworkPolicy, bool) {
 	if existPolicy.Metadata["type"] == PolicyTypeIngress {
 		return mergeIngressPolicies(existPolicy, policies)
 	}
 	return mergeEgressPolicies(existPolicy, policies)
 }
 
-func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) (types.KnoxNetworkPolicy, bool) {
 	mergedPolicy := existPolicy
+	updated := false
 
 	for _, policy := range policies {
 		for _, newIngress := range policy.Spec.Ingress {
@@ -1564,11 +1565,14 @@ func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.
 
 					// selector matched, merge port/protocol pair
 					if newSelector == existSelector {
-
+						prevToPortsLen := len(existIngress.ToPorts)
 						if len(newIngress.ToPorts) > 0 {
 							existIngress.ToPorts = mergePortProtocol(existIngress.ToPorts, newIngress.ToPorts[0])
 						}
-						mergedPolicy.Spec.Ingress[i] = existIngress
+						if prevToPortsLen != len(existIngress.ToPorts) {
+							mergedPolicy.Spec.Ingress[i] = existIngress
+							updated = true
+						}
 						selectorFound = true
 						break
 					}
@@ -1577,6 +1581,7 @@ func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.
 				// new fromEndpoint selector with different match labels
 				if !selectorFound {
 					mergedPolicy.Spec.Ingress = append(mergedPolicy.Spec.Ingress, newIngress)
+					updated = true
 				}
 			} else if len(policy.Spec.Ingress[0].FromEntities) > 0 {
 				entityFound := false
@@ -1590,10 +1595,14 @@ func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.
 
 					// entities matched, merge port/protocol pair
 					if newEntity == existEntity {
+						prevToPortsLen := len(existIngress.ToPorts)
 						if len(newIngress.ToPorts) > 0 {
 							existIngress.ToPorts = mergePortProtocol(existIngress.ToPorts, newIngress.ToPorts[0])
 						}
-						mergedPolicy.Spec.Ingress[i] = existIngress
+						if prevToPortsLen != len(existIngress.ToPorts) {
+							mergedPolicy.Spec.Ingress[i] = existIngress
+							updated = true
+						}
 						entityFound = true
 						break
 					}
@@ -1602,16 +1611,18 @@ func mergeIngressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.
 				// new fromEntity selector
 				if !entityFound {
 					mergedPolicy.Spec.Ingress = append(mergedPolicy.Spec.Ingress, newIngress)
+					updated = true
 				}
 			}
 		}
 	}
 
-	return mergedPolicy
+	return mergedPolicy, updated
 }
 
-func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) types.KnoxNetworkPolicy {
+func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.KnoxNetworkPolicy) (types.KnoxNetworkPolicy, bool) {
 	mergedPolicy := existPolicy
+	updated := false
 
 	for _, policy := range policies {
 		for _, newEgress := range policy.Spec.Egress {
@@ -1629,10 +1640,14 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 
 					// selector matched, merge port/protocol pair
 					if newSelector == existSelector {
+						prevToPortsLen := len(existEgress.ToPorts)
 						if len(newEgress.ToPorts) > 0 {
 							existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
 						}
-						mergedPolicy.Spec.Egress[i] = existEgress
+						if prevToPortsLen != len(existEgress.ToPorts) {
+							mergedPolicy.Spec.Egress[i] = existEgress
+							updated = true
+						}
 						selectorFound = true
 						break
 					}
@@ -1641,6 +1656,7 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 				// new toEndpoint selector with different match labels
 				if !selectorFound {
 					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+					updated = true
 				}
 			} else if len(policy.Spec.Egress[0].ToEntities) > 0 {
 				entityFound := false
@@ -1654,10 +1670,14 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 
 					// entities matched, merge port/protocol pair
 					if newEntity == existEntity {
+						prevToPortsLen := len(existEgress.ToPorts)
 						if len(newEgress.ToPorts) > 0 {
 							existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
 						}
-						mergedPolicy.Spec.Egress[i] = existEgress
+						if prevToPortsLen != len(existEgress.ToPorts) {
+							mergedPolicy.Spec.Egress[i] = existEgress
+							updated = true
+						}
 						entityFound = true
 						break
 					}
@@ -1666,6 +1686,7 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 				// new fromEntity selector
 				if !entityFound {
 					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+					updated = true
 				}
 			} else if len(policy.Spec.Egress[0].ToFQDNs) > 0 {
 				fqdnFound := false
@@ -1679,10 +1700,14 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 
 					// FQDNs matched, merge port/protocol pair
 					if newFQDN == existFQDN {
+						prevToPortsLen := len(existEgress.ToPorts)
 						if len(newEgress.ToPorts) > 0 {
 							existEgress.ToPorts = mergePortProtocol(existEgress.ToPorts, newEgress.ToPorts[0])
 						}
-						mergedPolicy.Spec.Egress[i] = existEgress
+						if prevToPortsLen != len(existEgress.ToPorts) {
+							mergedPolicy.Spec.Egress[i] = existEgress
+							updated = true
+						}
 						fqdnFound = true
 						break
 					}
@@ -1691,12 +1716,13 @@ func mergeEgressPolicies(existPolicy types.KnoxNetworkPolicy, policies []types.K
 				// new fromEntity selector
 				if !fqdnFound {
 					mergedPolicy.Spec.Egress = append(mergedPolicy.Spec.Egress, newEgress)
+					updated = true
 				}
 			}
 		}
 	}
 
-	return mergedPolicy
+	return mergedPolicy, updated
 }
 
 func mergePortProtocol(existPorts []types.SpecPort, newPort types.SpecPort) []types.SpecPort {
@@ -1725,6 +1751,12 @@ func convertKnoxNetworkLogToKnoxNetworkPolicy(log *types.KnoxNetworkLog, pods []
 		ingress := types.Ingress{}
 		egress.MatchLabels = getEndpointMatchLabels(log.DstPodName, pods)
 		ingress.MatchLabels = getEndpointMatchLabels(log.SrcPodName, pods)
+
+		if log.SrcNamespace != log.DstNamespace {
+			// cross namespace policy
+			egress.MatchLabels["io.kubernetes.pod.namespace"] = log.DstNamespace
+			ingress.MatchLabels["io.kubernetes.pod.namespace"] = log.SrcNamespace
+		}
 
 		// 1.3 Set the dst port/protocol
 		if !libs.IsICMP(log.Protocol) {
@@ -1930,6 +1962,8 @@ func getLabelArrayFromMap(labelMap map[string]string) []string {
 	for k, v := range labelMap {
 		labels = append(labels, (k + "=" + v))
 	}
+
+	sort.Strings(labels)
 
 	return labels
 }
