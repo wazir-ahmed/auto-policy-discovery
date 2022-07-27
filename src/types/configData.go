@@ -55,6 +55,9 @@ type ConfigNetworkPolicy struct {
 	NetPolicyL7Level int `json:"network_policy_l7_level,omitempty" bson:"network_policy_l7_level,omitempty"`
 
 	NetSkipCertVerification bool `json:"skip_cert_verification,omitempty" bson:"skip_cert_verification,omitempty"`
+
+	DebugFlowCluster string   `json:"debug_flow_cluster,omitempty" bson:"debug_flow_cluster,omitempty"`
+	DebugFlowLabels  []string `json:"debug_flow_labels,omitempty" bson:"debug_flow_labels,omitempty"`
 }
 
 type SystemLogFilter struct {

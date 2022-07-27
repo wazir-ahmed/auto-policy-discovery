@@ -49,6 +49,14 @@ func GetAllClusterResources(cluster string) ([]string, []types.Service, []types.
 		endpoints := GetEndpointsFromCluster(clusterInstance)
 		pods := GetPodsFromCluster(clusterInstance)
 
+		/*
+			fmt.Println("ClusterMgmt Data")
+			fmt.Println("----------------")
+			fmt.Printf("Namespaces --> %v\n\n", namespaces)
+			fmt.Printf("Endpoints --> %#v\n\n", endpoints)
+			fmt.Printf("Pods --> %#v\n\n", pods)
+		*/
+
 		return namespaces, services, endpoints, pods, nil
 	}
 }

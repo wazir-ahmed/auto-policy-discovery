@@ -54,3 +54,18 @@ cilium-hubble:
 kubearmor:
   url: localhost
   port: 32767
+
+feed-consumer:
+  kafka:
+    number-of-consumers: 1
+    broker-address-family: v4
+    session-timeout-ms: 6000
+    auto-offset-reset: "earliest"
+    bootstrap-servers: "localhost:9092"
+    group-id: 1 
+    topics:
+      - cilium-alerts
+    ssl:
+      enabled: false
+    events:
+      buffer: 1

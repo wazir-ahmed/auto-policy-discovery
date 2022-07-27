@@ -313,7 +313,7 @@ func GetEndpointsFromCluster(cluster types.Cluster) []types.Endpoint {
 		for _, m := range epCluster.Mappings {
 			protocol, ok := m["Protocol"].(string)
 			if !ok {
-				log.Error().Msg("Field protocol is not a string")
+				// log.Error().Msg("Field protocol is not a string")
 			}
 
 			mapping := types.Mapping{

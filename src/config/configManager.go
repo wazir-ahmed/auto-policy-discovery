@@ -144,6 +144,9 @@ func LoadConfigFromFile() {
 		NetPolicyL7Level: 1,
 
 		NetSkipCertVerification: viper.GetBool("application.network.skip-cert-verification"),
+
+		DebugFlowCluster: viper.GetString("application.network.debug-flow-cluster"),
+		DebugFlowLabels:  viper.GetStringSlice("application.network.debug-flow-labels"),
 	}
 
 	var ns, notNs []string

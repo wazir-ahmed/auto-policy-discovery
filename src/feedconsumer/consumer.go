@@ -2,6 +2,7 @@ package feedconsumer
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/accuknox/auto-policy-discovery/src/config"
+	"github.com/accuknox/auto-policy-discovery/src/libs"
 	logger "github.com/accuknox/auto-policy-discovery/src/logging"
 	"github.com/accuknox/auto-policy-discovery/src/plugin"
 	types "github.com/accuknox/auto-policy-discovery/src/types"
@@ -213,22 +216,23 @@ func (cfc *KnoxFeedConsumer) processNetworkLogMessage(message []byte) error {
 	if cfc.netLogEventsCount == cfc.eventsBuffer {
 		if len(cfc.netLogEvents) > 0 {
 			for _, netLog := range cfc.netLogEvents {
-				time, _ := strconv.ParseInt(netLog.Time, 10, 64)
+				time, e := time.Parse(time.RFC3339Nano, netLog.Time)
+				if e != nil {
+					log.Error().Msg(e.Error())
+				}
 				flow := &cilium.Flow{
 					TrafficDirection: cilium.TrafficDirection(plugin.TrafficDirection[netLog.TrafficDirection]),
 					PolicyMatchType:  uint32(netLog.PolicyMatchType),
 					DropReason:       uint32(netLog.DropReason),
 					Verdict:          cilium.Verdict(plugin.Verdict[netLog.Verdict]),
-					Time: &timestamppb.Timestamp{
-						Seconds: time,
-					},
-					EventType:   &cilium.CiliumEventType{},
-					Source:      &cilium.Endpoint{},
-					Destination: &cilium.Endpoint{},
-					IP:          &cilium.IP{},
-					L4:          &cilium.Layer4{},
-					L7:          &cilium.Layer7{},
-					IsReply:     &wrappers.BoolValue{Value: netLog.Reply},
+					Time:             timestamppb.New(time),
+					EventType:        &cilium.CiliumEventType{},
+					Source:           &cilium.Endpoint{},
+					Destination:      &cilium.Endpoint{},
+					IP:               &cilium.IP{},
+					L4:               &cilium.Layer4{},
+					L7:               &cilium.Layer7{},
+					IsReply:          &wrappers.BoolValue{Value: netLog.Reply},
 				}
 
 				// _ = is to ignore the return value
@@ -238,6 +242,8 @@ func (cfc *KnoxFeedConsumer) processNetworkLogMessage(message []byte) error {
 				_ = plugin.GetFlowData(netLog.IP, flow.IP)
 				_ = plugin.GetFlowData(netLog.L4, flow.L4)
 				_ = plugin.GetFlowData(netLog.L7, flow.L7)
+
+				handleDebugFlowLogs(netLog.ClusterName, flow)
 
 				knoxFlow, valid := plugin.ConvertCiliumFlowToKnoxNetworkLog(flow)
 				if valid {
@@ -255,6 +261,41 @@ func (cfc *KnoxFeedConsumer) processNetworkLogMessage(message []byte) error {
 	}
 
 	return nil
+}
+
+func handleDebugFlowLogs(clusterName string, flow *cilium.Flow) {
+	debugCluster := config.CurrentCfg.ConfigNetPolicy.DebugFlowCluster
+	debugLabels := config.CurrentCfg.ConfigNetPolicy.DebugFlowLabels
+	lenDebugLabels := len(debugLabels)
+
+	if debugCluster == "" && lenDebugLabels == 0 {
+		return
+	}
+
+	clusterMatched := false
+	if clusterName == debugCluster {
+		clusterMatched = true
+		if lenDebugLabels == 0 {
+			r, _ := json.Marshal(flow)
+			fmt.Println("[Debug] Received Flow -->", string(r))
+		}
+	}
+
+	if (debugCluster == "" || clusterMatched == true) && len(debugLabels) > 0 {
+		for _, label := range debugLabels {
+			label = "k8s:" + label
+			if libs.ContainsElement(flow.Source.GetLabels(), label) {
+				r, _ := json.Marshal(flow)
+				fmt.Println("[Debug] Received Flow -->", string(r))
+				break
+			}
+			if libs.ContainsElement(flow.Destination.GetLabels(), label) {
+				r, _ := json.Marshal(flow)
+				fmt.Println("[Debug] Received Flow -->", string(r))
+				break
+			}
+		}
+	}
 }
 
 // == //
