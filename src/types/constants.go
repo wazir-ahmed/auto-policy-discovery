@@ -9,9 +9,6 @@ const (
 	PolicyDiscoveryContainerNamespace = "container_namespace"
 	PolicyDiscoveryContainerPodName   = "container_podname"
 
-	// KubeArmor k8s
-	PreConfiguredKubearmorRule = "/lib/x86_64-linux-gnu/"
-
 	// RecordSeparator - DB separator flag
 	RecordSeparator = "^^"
 )

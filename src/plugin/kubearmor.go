@@ -26,6 +26,13 @@ var KubeArmorRelayLogsMutex *sync.Mutex
 var KubeArmorFCLogs []*types.KnoxSystemLog
 var KubeArmorFCLogsMutex *sync.Mutex
 
+// Directory paths for default rules
+var KubeArmorDefaultRuleFilePath = []string{
+	"/lib/x86_64-linux-gnu/",
+	"/proc/",
+	"/sys/",
+}
+
 func generateProcessPaths(fromSrc []types.KnoxFromSource) []string {
 	var processpaths []string
 	for _, locfrmsrc := range fromSrc {
@@ -60,11 +67,14 @@ func ConvertKnoxSystemPolicyToKubeArmorPolicy(knoxPolicies []types.KnoxSystemPol
 		kubePolicy.Spec = policy.Spec
 
 		if kubePolicy.Kind == "KubeArmorPolicy" {
-			dirRule := types.KnoxMatchDirectories{
-				Dir:       types.PreConfiguredKubearmorRule,
-				Recursive: true,
+			for _, path := range KubeArmorDefaultRuleFilePath {
+				dirRule := types.KnoxMatchDirectories{
+					Dir:       path,
+					Recursive: true,
+				}
+				policy.Spec.File.MatchDirectories = append(policy.Spec.File.MatchDirectories, dirRule)
 			}
-			kubePolicy.Spec.File.MatchDirectories = append(policy.Spec.File.MatchDirectories, dirRule)
+			kubePolicy.Spec.File.MatchDirectories = policy.Spec.File.MatchDirectories
 		}
 
 		for _, procpath := range kubePolicy.Spec.Process.MatchPaths {
@@ -267,8 +277,10 @@ func ConvertKubeArmorLogToKnoxSystemLog(relayLog *pb.Log) (types.KnoxSystemLog, 
 		resource = ""
 	}
 
-	if strings.HasPrefix(resource, types.PreConfiguredKubearmorRule) {
-		return types.KnoxSystemLog{}, errors.New("predefined file resource")
+	for _, path := range KubeArmorDefaultRuleFilePath {
+		if strings.HasPrefix(resource, path) {
+			return types.KnoxSystemLog{}, errors.New("predefined file resource")
+		}
 	}
 
 	knoxSystemLog := types.KnoxSystemLog{
