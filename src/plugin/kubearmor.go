@@ -269,10 +269,6 @@ func ConvertKubeArmorLogToKnoxSystemLog(relayLog *pb.Log) (types.KnoxSystemLog, 
 		readOnly = true
 	}
 
-	if strings.Contains(source, "runc") {
-		source = ""
-	}
-
 	if strings.Contains(resource, "runc") {
 		resource = ""
 	}
