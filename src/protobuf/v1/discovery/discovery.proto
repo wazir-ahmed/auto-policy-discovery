@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package v1.discovery;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/accuknox/knoxAutoPolicy/protos/v1/discovery";
+
+service Discovery {
+  rpc GetPolicy(GetPolicyRequest) returns (stream GetPolicyResponse) {}
+}
+
+message GetPolicyRequest {
+  bool follow = 1;
+  PolicyType type = 2;
+  string cluster = 3;
+  string namespace = 4;
+  repeated string label = 5;
+  string from_source = 6;
+}   
+
+enum PolicyType {
+  // proto3 requires that first value in enum have numeric value of 0
+  UNSPECIFIED = 0;
+
+  KUBEARMOR = 1;
+  CILIUM = 2;
+  K8S_NETWORK = 3;
+}
+
+message GetPolicyResponse {
+  oneof policy {
+    KubeArmorPolicy kubearmor = 1;
+    CiliumPolicy cilium = 2;
+    K8sNetworkPolicy k8s_network = 3;
+  }
+  string error = 100;
+  google.protobuf.Timestamp time = 101;
+}
+
+message KubeArmorPolicy {
+  bytes yaml = 1;
+}
+
+message CiliumPolicy {
+  bytes yaml = 1;
+}
+
+message K8sNetworkPolicy {
+  bytes yaml = 1;
+}
