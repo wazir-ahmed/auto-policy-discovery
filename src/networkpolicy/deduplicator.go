@@ -939,34 +939,47 @@ func UpdateDuplicatedPolicy(existingPolicies []types.KnoxNetworkPolicy, discover
 	for _, newPolicy := range discoveredPolicies {
 		lblArr := getLabelArrayFromMap(newPolicy.Spec.Selector.MatchLabels)
 		selector := Selector{newPolicy.Kind, strings.Join(lblArr, ",")}
+
+		var updated, np bool
+		var mergedPolicy, namedPolicy types.KnoxNetworkPolicy
+
 		if newPolicy.Metadata["type"] == PolicyTypeIngress {
 			existPolicy, ok := existIngressPolicies[selector]
 			if ok {
 				// Ingress policy for this endpoint exists already
-				mergedPolicy, updated := mergeIngressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
+				mergedPolicy, updated = mergeIngressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
 				if updated {
 					existIngressPolicies[selector] = mergedPolicy
 					libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
 				}
 			} else {
 				// Ingress policy for this endpoint does not exists previously
-				namedPolicy := GeneratePolicyName(policyNamesMap, newPolicy, clusterName)
+				namedPolicy = GeneratePolicyName(policyNamesMap, newPolicy, clusterName)
 				newPolicies = append(newPolicies, namedPolicy)
+				np = true
 			}
 		} else {
 			existPolicy, ok := existEgressPolicies[selector]
 			if ok {
 				// Egress policy for this endpoint exists already
-				mergedPolicy, updated := mergeEgressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
+				mergedPolicy, updated = mergeEgressPolicies(existPolicy, []types.KnoxNetworkPolicy{newPolicy})
 				if updated {
 					existEgressPolicies[selector] = mergedPolicy
 					libs.UpdateNetworkPolicy(CfgDB, mergedPolicy)
 				}
 			} else {
 				// Egress policy for this endpoint does not exists previously
-				namedPolicy := GeneratePolicyName(policyNamesMap, newPolicy, clusterName)
+				namedPolicy = GeneratePolicyName(policyNamesMap, newPolicy, clusterName)
 				newPolicies = append(newPolicies, namedPolicy)
+				np = true
 			}
+		}
+
+		// send updated policy to grpc client
+		if updated {
+			PolicyStore.Publish(&PubNetPolicy{mergedPolicy})
+		} else if np {
+			PolicyStore.Publish(&PubNetPolicy{mergedPolicy})
 		}
 	}
 

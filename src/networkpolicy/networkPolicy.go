@@ -14,6 +14,7 @@ import (
 	logger "github.com/accuknox/auto-policy-discovery/src/logging"
 	"github.com/accuknox/auto-policy-discovery/src/plugin"
 	"github.com/accuknox/auto-policy-discovery/src/types"
+	cu "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/utils"
 	"github.com/clarketm/json"
 	"github.com/google/go-cmp/cmp"
 	"sigs.k8s.io/yaml"
@@ -2138,20 +2139,18 @@ func PopulateNetworkPoliciesFromNetworkLogs(networkLogs []types.KnoxNetworkLog) 
 }
 
 func writeNetworkPoliciesYamlToDB(policies []types.KnoxNetworkPolicy) {
-	clusternames := []string{}
+	clusters := []string{}
 
 	for _, pol := range policies {
-		clusternames = append(clusternames, pol.Metadata["cluster_name"])
+		clusters = append(clusters, pol.Metadata["cluster_name"])
 	}
 
 	// convert knoxPolicy to CiliumPolicy
 	ciliumPolicies := plugin.ConvertKnoxPoliciesToCiliumPolicies(policies)
 
-	res := []types.Policy{}
+	res := []types.PolicyYaml{}
 
-	for index, ciliumPolicy := range ciliumPolicies {
-		var label string
-
+	for i, ciliumPolicy := range ciliumPolicies {
 		jsonBytes, err := json.Marshal(ciliumPolicy)
 		if err != nil {
 			log.Error().Msg(err.Error())
@@ -2162,30 +2161,26 @@ func writeNetworkPoliciesYamlToDB(policies []types.KnoxNetworkPolicy) {
 			log.Error().Msg(err.Error())
 			continue
 		}
-		policyYaml := string(yamlBytes)
 
-		if ciliumPolicy.Spec.NodeSelector.MatchLabels != nil {
-			for k, v := range ciliumPolicy.Spec.NodeSelector.MatchLabels {
-				label = k + "=" + v
-			}
+		var labels types.LabelMap
+		if ciliumPolicy.Kind != cu.ResourceTypeCiliumNetworkPolicy {
+			labels = ciliumPolicy.Spec.EndpointSelector.MatchLabels
 		} else {
-			for k, v := range ciliumPolicy.Spec.EndpointSelector.MatchLabels {
-				label = k + "=" + v
-			}
+			labels = ciliumPolicy.Spec.NodeSelector.MatchLabels
 		}
 
-		res = append(res, types.Policy{
-			Type:        "network",
-			Kind:        ciliumPolicy.Kind,
-			PolicyName:  ciliumPolicy.Metadata["name"],
-			Namespace:   ciliumPolicy.Metadata["namespace"],
-			ClusterName: clusternames[index],
-			Labels:      label,
-			PolicyYaml:  policyYaml,
+		res = append(res, types.PolicyYaml{
+			Type:      types.PolicyTypeNetwork,
+			Kind:      ciliumPolicy.Kind,
+			Name:      ciliumPolicy.Metadata["name"],
+			Namespace: ciliumPolicy.Metadata["namespace"],
+			Cluster:   clusters[i],
+			Labels:    labels,
+			Yaml:      yamlBytes,
 		})
 	}
 
-	if err := libs.UpdateOrInsertPolicies(CfgDB, res); err != nil {
+	if err := libs.UpdateOrInsertPolicyYamls(CfgDB, res); err != nil {
 		log.Error().Msgf(err.Error())
 	}
 }

@@ -989,6 +989,7 @@ func updateSysPolicies() {
 
 		for _, sysPolicyDb := range sysPoliciesDb {
 			if sysPolicyDb.Metadata["name"] == wpfsPolicy.Metadata["name"] {
+				notifyPolicyUpdate(wpfsPolicy)
 				libs.UpdateSystemPolicy(CfgDB, wpfsPolicy)
 				isPolicyExist = true
 				break
@@ -996,11 +997,17 @@ func updateSysPolicies() {
 		}
 
 		if !isPolicyExist {
+			notifyPolicyUpdate(wpfsPolicy)
 			locSysPolicies = append(locSysPolicies, wpfsPolicy)
 		}
 	}
 
 	libs.InsertSystemPolicies(CfgDB, locSysPolicies)
+}
+
+func notifyPolicyUpdate(sysPolicy types.KnoxSystemPolicy) {
+	kubePolicy := plugin.ConvertKnoxSystemPolicyToKubeArmorPolicy([]types.KnoxSystemPolicy{sysPolicy})
+	PolicyStore.Publish(&PubSysPolicy{kubePolicy[0]})
 }
 
 // ============================= //
@@ -1324,11 +1331,9 @@ func GenFileSetForAllPodsInCluster(clusterName string, pods []types.Pod, settype
 func insertSysPoliciesYamlToDB(policies []types.KnoxSystemPolicy) {
 	kubeArmorPolicies := plugin.ConvertKnoxSystemPolicyToKubeArmorPolicy(policies)
 
-	res := []types.Policy{}
+	res := []types.PolicyYaml{}
 
 	for _, kubearmorPolicy := range kubeArmorPolicies {
-		var label string
-
 		jsonBytes, err := json.Marshal(kubearmorPolicy)
 		if err != nil {
 			log.Error().Msg(err.Error())
@@ -1339,24 +1344,19 @@ func insertSysPoliciesYamlToDB(policies []types.KnoxSystemPolicy) {
 			log.Error().Msg(err.Error())
 			continue
 		}
-		policyYaml := string(yamlBytes)
 
-		for k, v := range kubearmorPolicy.Spec.Selector.MatchLabels {
-			label = k + "=" + v
-		}
-
-		res = append(res, types.Policy{
-			Type:        "system",
-			Kind:        kubearmorPolicy.Kind,
-			PolicyName:  kubearmorPolicy.Metadata["name"],
-			Namespace:   kubearmorPolicy.Metadata["namespace"],
-			ClusterName: kubearmorPolicy.Metadata["clusterName"],
-			Labels:      label,
-			PolicyYaml:  policyYaml,
+		res = append(res, types.PolicyYaml{
+			Type:      types.PolicyTypeSystem,
+			Kind:      kubearmorPolicy.Kind,
+			Name:      kubearmorPolicy.Metadata["name"],
+			Namespace: kubearmorPolicy.Metadata["namespace"],
+			Cluster:   kubearmorPolicy.Metadata["clusterName"],
+			Labels:    kubearmorPolicy.Spec.Selector.MatchLabels,
+			Yaml:      yamlBytes,
 		})
 	}
 
-	if err := libs.UpdateOrInsertPolicies(CfgDB, res); err != nil {
+	if err := libs.UpdateOrInsertPolicyYamls(CfgDB, res); err != nil {
 		log.Error().Msgf(err.Error())
 	}
 }

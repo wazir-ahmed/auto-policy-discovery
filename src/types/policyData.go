@@ -1,5 +1,8 @@
 package types
 
+// LabelMap stores the label of an endpoint
+type LabelMap = map[string]string
+
 // ========================= //
 // == Knox Network Policy == //
 // ========================= //
@@ -310,15 +313,62 @@ type KubeArmorPolicy struct {
 	Spec KnoxSystemSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 }
 
-// =============== //
-// == Policy DB == //
-// =============== //
-type Policy struct {
-	Type        string `json:"type,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Namespace   string `json:"namespace,omitempty"`
-	ClusterName string `json:"cluster_name,omitempty"`
-	Labels      string `json:"labels,omitempty"`
-	PolicyName  string `json:"policy_name,omitempty"`
-	PolicyYaml  string `json:"policy_yaml,omitempty"`
+// KnoxPolicy defines some generic methods that should be implemented by all the policy types
+type KnoxPolicy interface {
+	GetType() string
+	GetCluster() string
+	GetName() string
+	GetNamespace() string
+	GetLabels() LabelMap
+	IsKind(kind string) bool
+	ToYaml(kind string) []byte
+}
+
+// PolicyFilter is used for GetFlow RPC in Discovery Service.
+type PolicyFilter struct {
+	Cluster   string
+	Namespace string
+	Labels    LabelMap
+}
+
+// PolicyYaml stores a policy in YAML format along with its metadata
+type PolicyYaml struct {
+	Type      string   `json:"type,omitempty"`
+	Kind      string   `json:"kind,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Namespace string   `json:"namespace,omitempty"`
+	Cluster   string   `json:"cluster,omitempty"`
+	Labels    LabelMap `json:"labels,omitempty"`
+	Yaml      []byte   `json:"yaml,omitempty"`
+}
+
+func (p *PolicyYaml) GetType() string {
+	return p.Type
+}
+
+func (p *PolicyYaml) GetName() string {
+	return p.Name
+}
+
+func (p *PolicyYaml) GetNamespace() string {
+	return p.Namespace
+}
+
+func (p *PolicyYaml) GetCluster() string {
+	return p.Cluster
+}
+
+func (p *PolicyYaml) GetLabels() LabelMap {
+	return p.Labels
+}
+
+func (p *PolicyYaml) IsKind(kind string) bool {
+	if kind == p.Kind {
+		return true
+	}
+	return false
+}
+
+func (p *PolicyYaml) ToYaml(kind string) []byte {
+	return p.Yaml
 }
